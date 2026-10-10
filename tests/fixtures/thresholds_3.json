@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "feature_count": 3,
+  "anomaly_threshold": 0.05,
+  "missing_fraction_threshold": 0.1,
+  "features": [
+    {"feature_id": "feature_000", "eligible": true, "lower": -5.0, "upper": 9.0, "iqr": 2.0},
+    {"feature_id": "feature_001", "eligible": false, "lower": null, "upper": null, "iqr": null},
+    {"feature_id": "feature_002", "eligible": false, "lower": null, "upper": null, "iqr": null}
+  ]
+}

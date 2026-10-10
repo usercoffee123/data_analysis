@@ -1,0 +1,1 @@
+{"readings":[{"sensor_id":"pump-07-vibration","value":12.4,"unit":"mm/s","warning_max":7.1,"critical_max":11.0},{"sensor_id":"pump-07-temperature","value":68.0,"unit":"C","warning_max":75.0,"critical_max":90.0}]}

@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+.venv/
+
+# Generated analysis outputs (raw benchmark files stay available).
+*.manifest.json
+*.manifest.md
+*.manifest.summary.md
