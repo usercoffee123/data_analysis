@@ -1,4 +1,4 @@
-"""A small, deterministic LangGraph for sensor triage."""
+"""Sensor triage: validate input, check configured bounds, and interpret findings."""
 
 from __future__ import annotations
 
@@ -7,19 +7,16 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import math
-import os
 from pathlib import Path
-import re
-import tempfile
 from typing import Any, Callable, TypedDict
-from urllib.error import URLError
-from urllib.request import Request, urlopen
 
 from langgraph.graph import END, START, StateGraph
 
+from analysis_io import read_input, write_json
+from ollama_client import OLLAMA_MODEL, OLLAMA_URL, analyze_with_ollama
 
-OLLAMA_MODEL = "qwen3.5:9b"
-OLLAMA_URL = "http://localhost:11434/api/chat"
+
+THRESHOLD_KEYS = ("warning_min", "warning_max", "critical_min", "critical_max")
 
 
 class SensorState(TypedDict, total=False):
@@ -32,7 +29,42 @@ class SensorState(TypedDict, total=False):
 
 
 def _is_number(value: Any) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+    )
+
+
+def _validate_reading(item: Any, prefix: str) -> tuple[dict[str, Any] | None, str | None]:
+    """Normalize one reading, or return its first validation error."""
+    if not isinstance(item, dict):
+        return None, f"{prefix} must be an object"
+    sensor_id = item.get("sensor_id")
+    if not isinstance(sensor_id, str) or not sensor_id.strip():
+        return None, f"{prefix}.sensor_id must be a non-empty string"
+    if not _is_number(item.get("value")):
+        return None, f"{prefix}.value must be a finite number"
+
+    reading = {
+        "sensor_id": sensor_id,
+        "value": item["value"],
+        "unit": item.get("unit", ""),
+    }
+    for key in THRESHOLD_KEYS:
+        threshold = item.get(key)
+        if threshold is None:
+            continue
+        if not _is_number(threshold):
+            return None, f"{prefix}.{key} must be a finite number"
+        reading[key] = threshold
+
+    for level in ("warning", "critical"):
+        low_key, high_key = f"{level}_min", f"{level}_max"
+        low, high = reading.get(low_key), reading.get(high_key)
+        if low is not None and high is not None and low > high:
+            return None, f"{prefix}.{low_key} must be less than or equal to {high_key}"
+    return reading, None
 
 
 def validate_input(state: SensorState) -> dict[str, Any]:
@@ -46,73 +78,32 @@ def validate_input(state: SensorState) -> dict[str, Any]:
 
     readings: list[dict[str, Any]] = []
     errors: list[str] = []
-    threshold_keys = ("warning_min", "warning_max", "critical_min", "critical_max")
-
     for index, item in enumerate(raw_readings):
-        prefix = f"readings[{index}]"
-        if not isinstance(item, dict):
-            errors.append(f"{prefix} must be an object")
-            continue
-        sensor_id = item.get("sensor_id")
-        value = item.get("value")
-        if not isinstance(sensor_id, str) or not sensor_id.strip():
-            errors.append(f"{prefix}.sensor_id must be a non-empty string")
-            continue
-        if not _is_number(value):
-            errors.append(f"{prefix}.value must be a finite number")
-            continue
-
-        reading: dict[str, Any] = {
-            "sensor_id": sensor_id,
-            "value": value,
-            "unit": item.get("unit", ""),
-        }
-        invalid_threshold = False
-        for key in threshold_keys:
-            threshold = item.get(key)
-            if threshold is not None:
-                if not _is_number(threshold):
-                    errors.append(f"{prefix}.{key} must be a finite number")
-                    invalid_threshold = True
-                    break
-                reading[key] = threshold
-        if invalid_threshold:
-            continue
-
-        for low_key, high_key in (("warning_min", "warning_max"), ("critical_min", "critical_max")):
-            low = reading.get(low_key)
-            high = reading.get(high_key)
-            if low is not None and high is not None and low > high:
-                errors.append(f"{prefix}.{low_key} must be less than or equal to {high_key}")
-                invalid_threshold = True
-                break
-        if not invalid_threshold:
+        reading, error = _validate_reading(item, f"readings[{index}]")
+        if error is not None:
+            errors.append(error)
+        elif reading is not None:
             readings.append(reading)
 
     return {"readings": readings, "errors": errors}
 
 
+def _outside_bounds(reading: dict[str, Any], level: str) -> bool:
+    low, high = reading.get(f"{level}_min"), reading.get(f"{level}_max")
+    value = reading["value"]
+    return (low is not None and value < low) or (high is not None and value > high)
+
+
 def assess_readings(state: SensorState) -> dict[str, Any]:
     assessments = []
     for reading in state["readings"]:
-        value = reading["value"]
-        critical = (
-            (reading.get("critical_min") is not None and value < reading["critical_min"])
-            or (reading.get("critical_max") is not None and value > reading["critical_max"])
-        )
-        warning = (
-            (reading.get("warning_min") is not None and value < reading["warning_min"])
-            or (reading.get("warning_max") is not None and value > reading["warning_max"])
-        )
-        has_threshold = any(key in reading for key in ("warning_min", "warning_max", "critical_min", "critical_max"))
-
-        if critical:
+        if _outside_bounds(reading, "critical"):
             status = "critical"
             evidence = "value is outside a configured critical bound"
-        elif warning:
+        elif _outside_bounds(reading, "warning"):
             status = "warning"
             evidence = "value is outside a configured warning bound"
-        elif has_threshold:
+        elif any(key in reading for key in THRESHOLD_KEYS):
             status = "normal"
             evidence = "value is within configured bounds"
         else:
@@ -123,105 +114,68 @@ def assess_readings(state: SensorState) -> dict[str, Any]:
     return {"assessments": assessments}
 
 
-def analyze_with_ollama(
-    readings: list[dict[str, Any]], assessments: list[dict[str, Any]]
-) -> dict[str, Any]:
-    prompt = {"readings": readings, "deterministic_rule_findings": assessments}
-    request_body = {
-        "model": OLLAMA_MODEL,
-        "stream": False,
-        "think": False,
-        "format": "json",
-        "options": {"temperature": 0},
-        "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "Analyze the sensor readings for a human operator. Use only the provided data. "
-                    "Do not invent causes or claim certainty. Distinguish observations from hypotheses. "
-                    "If given a dataset profile, explain historical outcomes and missing data; "
-                    "anonymous feature IDs have no known physical meaning or units. "
-                    "Historical labels are not predictions. Do not infer current equipment health. "
-                    "Return JSON with keys summary (string), observations (array of objects with "
-                    "sensor_id, interpretation, confidence), and limitations (string)."
-                ),
-            },
-            {"role": "user", "content": json.dumps(prompt)},
-        ],
-    }
-    request = Request(
-        OLLAMA_URL,
-        data=json.dumps(request_body).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urlopen(request, timeout=120) as response:
-            response_data = json.loads(response.read().decode("utf-8"))
-    except (URLError, TimeoutError) as exc:
-        raise RuntimeError(f"Could not reach Ollama at {OLLAMA_URL}: {exc}") from exc
+def _overall_decision(assessments: list[dict[str, Any]]) -> tuple[str, str]:
+    """Choose the most severe status and its operator action."""
+    statuses = {item["status"] for item in assessments}
+    if "critical" in statuses:
+        return (
+            "critical",
+            "Escalate using the site's approved response procedure and verify the sensor reading.",
+        )
+    if "warning" in statuses:
+        return (
+            "warning",
+            "Review the flagged readings and follow the site's approved operating procedure.",
+        )
+    if "unknown" in statuses or not assessments:
+        return (
+            "needs_review",
+            "Configure validated thresholds and review the readings before drawing an operational conclusion.",
+        )
+    return "normal", "Continue routine monitoring."
 
-    content = response_data.get("message", {}).get("content")
-    try:
-        analysis = json.loads(content)
-    except (TypeError, json.JSONDecodeError) as exc:
-        raise RuntimeError("Ollama returned invalid JSON analysis") from exc
-    if not isinstance(analysis, dict) or not isinstance(analysis.get("summary"), str):
-        raise RuntimeError("Ollama response must be a JSON object containing a summary")
-    analysis.setdefault("observations", [])
-    analysis.setdefault("limitations", "Model-generated interpretation; verify against operational context.")
-    return analysis
+
+def _reading_brief(item: dict[str, Any]) -> tuple[str, str | None]:
+    """Explain one assessed reading and suggest a follow-up when it needs attention."""
+    sensor_id, value, status = item["sensor_id"], item["value"], item["status"]
+    unit = item.get("unit", "")
+    measurement = f"{value} {unit}".strip()
+    if status in ("critical", "warning"):
+        descriptions = []
+        for direction, comparison in (("min", "below"), ("max", "above")):
+            bound = item.get(f"{status}_{direction}")
+            if bound is None:
+                continue
+            breached = value < bound if direction == "min" else value > bound
+            if breached:
+                limit = f"{bound} {unit}".strip()
+                descriptions.append(
+                    f"{sensor_id} measured {measurement}, {comparison} the "
+                    f"configured {status} {direction} of {limit}."
+                )
+        return " ".join(descriptions), (
+            f"Verify the {sensor_id} reading and sensor condition; review recent "
+            "readings and operating context with the responsible operator."
+        )
+    if status == "unknown":
+        return (
+            f"{sensor_id} measured {measurement}, but no thresholds were "
+            "configured, so its operational status could not be determined.",
+            f"Have the responsible domain owner configure validated thresholds for {sensor_id}.",
+        )
+    return f"{sensor_id} measured {measurement}, within its configured bounds.", None
 
 
 def create_decision_brief(state: SensorState) -> dict[str, Any]:
     assessments = state.get("assessments", [])
-    statuses = {item["status"] for item in assessments}
-    if "critical" in statuses:
-        overall = "critical"
-        action = "Escalate using the site's approved response procedure and verify the sensor reading."
-    elif "warning" in statuses:
-        overall = "warning"
-        action = "Review the flagged readings and follow the site's approved operating procedure."
-    elif "unknown" in statuses or not assessments:
-        overall = "needs_review"
-        action = "Configure validated thresholds and review the readings before drawing an operational conclusion."
-    else:
-        overall = "normal"
-        action = "Continue routine monitoring."
-
+    overall, action = _overall_decision(assessments)
     descriptions = []
     recommendations = [action]
     for item in assessments:
-        measurement = f"{item['value']} {item.get('unit', '')}".strip()
-        status = item["status"]
-        if status in ("critical", "warning"):
-            for direction, comparison in (("min", "below"), ("max", "above")):
-                bound = item.get(f"{status}_{direction}")
-                if bound is not None and (
-                    (direction == "min" and item["value"] < bound)
-                    or (direction == "max" and item["value"] > bound)
-                ):
-                    limit = f"{bound} {item.get('unit', '')}".strip()
-                    descriptions.append(
-                        f"{item['sensor_id']} measured {measurement}, {comparison} the "
-                        f"configured {status} {direction} of {limit}."
-                    )
-            recommendations.append(
-                f"Verify the {item['sensor_id']} reading and sensor condition; review recent "
-                "readings and operating context with the responsible operator."
-            )
-        elif status == "unknown":
-            descriptions.append(
-                f"{item['sensor_id']} measured {measurement}, but no thresholds were "
-                "configured, so its operational status could not be determined."
-            )
-            recommendations.append(
-                f"Have the responsible domain owner configure validated thresholds for {item['sensor_id']}."
-            )
-        else:
-            descriptions.append(
-                f"{item['sensor_id']} measured {measurement}, within its configured bounds."
-            )
+        description, recommendation = _reading_brief(item)
+        descriptions.append(description)
+        if recommendation is not None:
+            recommendations.append(recommendation)
     description = " ".join(descriptions) or "No sensor readings were available for assessment."
     description += " These readings alone do not establish a root cause or a change over time."
 
@@ -293,47 +247,27 @@ def run_assessment(
     return result["output"]
 
 
-def _write_manifest(path: Path, manifest: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary_path: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as temporary_file:
-            temporary_path = Path(temporary_file.name)
-            json.dump(manifest, temporary_file, indent=2)
-            temporary_file.write("\n")
-        os.replace(temporary_path, path)
-    finally:
-        if temporary_path is not None and temporary_path.exists():
-            temporary_path.unlink()
-
-
 def process_file(
     input_path: Path,
     expected_sha256: str | None,
     manifest_path: Path,
     analyzer: Callable[..., dict[str, Any]] = analyze_with_ollama,
 ) -> dict[str, Any]:
-    input_bytes = input_path.read_bytes()
-    actual_sha256 = hashlib.sha256(input_bytes).hexdigest()
-    digest_verified = bool(
-        expected_sha256
-        and re.fullmatch(r"[0-9a-fA-F]{64}", expected_sha256)
-        and actual_sha256 == expected_sha256.lower()
-    )
+    input_bytes, verification = read_input(input_path, expected_sha256)
     manifest: dict[str, Any] = {
         "schema_version": 1,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "input_file": str(input_path),
-        "sha256": actual_sha256,
-        "expected_sha256": expected_sha256,
-        "digest_verified": digest_verified,
+        "sha256": verification["sha256"],
+        "expected_sha256": verification["expected_sha256"],
+        "digest_verified": verification["digest_verified"],
         "model": OLLAMA_MODEL,
         "status": "failure",
     }
 
-    if not digest_verified:
+    if not verification["digest_verified"]:
         manifest["error"] = "SHA-256 verification failed or expected digest was missing/invalid"
-        _write_manifest(manifest_path, manifest)
+        write_json(manifest_path, manifest)
         return manifest
 
     try:
@@ -345,7 +279,7 @@ def process_file(
     except Exception as exc:
         manifest["error"] = f"{type(exc).__name__}: {exc}"
 
-    _write_manifest(manifest_path, manifest)
+    write_json(manifest_path, manifest)
     return manifest
 
 
@@ -370,21 +304,29 @@ SAMPLE_PAYLOAD = {
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Verify and analyze sensor readings with LangGraph and Ollama.")
-    parser.add_argument("input", nargs="?", type=Path, help="JSON file containing a readings array")
+    parser = argparse.ArgumentParser(
+        description="Verify and analyze sensor readings with LangGraph and Ollama."
+    )
+    parser.add_argument(
+        "input", nargs="?", type=Path, help="JSON file containing a readings array"
+    )
     parser.add_argument("--sha256", help="Expected SHA-256 digest of the exact input file bytes")
     parser.add_argument("--manifest", type=Path, help="Manifest output path")
     args = parser.parse_args()
 
     if args.input:
-        manifest_path = args.manifest or args.input.with_suffix(args.input.suffix + ".manifest.json")
+        manifest_path = args.manifest or args.input.with_suffix(
+            args.input.suffix + ".manifest.json"
+        )
         manifest = process_file(args.input, args.sha256, manifest_path)
     else:
         sample_bytes = json.dumps(SAMPLE_PAYLOAD, separators=(",", ":")).encode("utf-8")
         sample_path = Path("sensor-sample.json")
         manifest_path = args.manifest or Path("sensor-sample.manifest.json")
         sample_path.write_bytes(sample_bytes)
-        manifest = process_file(sample_path, hashlib.sha256(sample_bytes).hexdigest(), manifest_path)
+        manifest = process_file(
+            sample_path, hashlib.sha256(sample_bytes).hexdigest(), manifest_path
+        )
 
     print(json.dumps(manifest, indent=2))
     if manifest["status"] != "success":

@@ -1,65 +1,193 @@
-# Manufacturing analysis prototype
+# Manufacturing data analysis
 
-A local LangGraph workflow for exploring manufacturing measurements and preparing evidence for an engineer. SECOM is the included historical semiconductor benchmark. The tool screens records and generates reports; it does not predict failures or determine equipment health.
+This project reads historical semiconductor manufacturing measurements and makes a list of records for a person to investigate. It checks for recorded failed tests, unusual values, and missing measurements, then saves readable reports.
 
-## Setup
+**You can run the included example without changing code or installing an AI model.** The example data and comparison rules are already included.
+
+A record marked “needs review” needs investigation. It is not proof of a defect. This project is an experiment, and it has not demonstrated reliable failure prediction.
+
+## Start here
+
+1. [Set up Python](#1-set-up-python) — do this once.
+2. [Run the example](#2-run-the-example).
+3. [Read the results](#3-read-the-results).
+
+For the rules, custom input files, and code details, see the [technical guide](docs/technical-guide.md).
+
+## 1. Set up Python
+
+You need Python 3.10 or newer and a copy of this project on your computer. The project has been tested here with Python 3.14.
+
+Open Terminal on macOS/Linux, or PowerShell on Windows. These let you run commands by typing or pasting text and pressing Enter. Run each command block separately and wait for it to finish. Copy only the commands inside the block.
+
+First, open the project folder in your terminal. Replace the example path below with the location where you saved this project:
+
+```sh
+cd "path/to/data_analysis"
+```
+
+You should be in the folder containing `README.md`, `requirements.txt`, and `run_example.py`.
+
+### macOS or Linux
+
+Check your Python version:
+
+```sh
+python3 --version
+```
+
+Create a separate place for this project's Python tools, called a virtual environment:
 
 ```sh
 python3 -m venv .venv
+```
+
+Install the tools the project needs:
+
+```sh
 .venv/bin/python -m pip install -r requirements.txt
 ```
 
-For optional LLM commentary, serve Ollama at `http://localhost:11434` with `qwen3.5:9b` installed. Commentary uses one aggregate model call. Per-sample flags, briefs, and evaluation metrics are calculated by Python.
+### Windows (PowerShell)
 
-## Process the included dataset
+Check your Python version:
 
-The repository includes `secom.thresholds.json` with fixed feature bounds and review cutoffs. Runs load this file and screen every input record against its values:
-
-```sh
-.venv/bin/python secom_graph.py data/secom/secom.data data/secom/secom_labels.data \
-  --sha256 20f0e7ee434f7dcbae0eea9ffff009a2b57f42d6b0dc9a5bd4f00782c0a3374c \
-  --labels-sha256 126884cf453705c9e61a903fe906f0665a3b45ce3639e621edc5c93c89627e03 \
-  --manifest reports/secom.manifest.json
+```powershell
+py --version
 ```
 
-The default threshold file is resolved beside `secom_graph.py`, regardless of the working directory. Use `--thresholds path/to/thresholds.json` to select another artifact. The artifact and feature layout are validated before screening. A missing or invalid threshold file fails the run; thresholds are never regenerated automatically. Reports record the artifact path, SHA-256 digest, and applied thresholds.
+Create the virtual environment:
 
-Add `--no-llm` for deterministic screening without Ollama. Add `--manifest reports/run.manifest.json` to change output destinations.
+```powershell
+py -m venv .venv
+```
 
-Three files are written:
+Install the tools the project needs:
 
-- `secom.manifest.summary.md`: short summary, recommendations, model commentary status, and measured screening results.
-- `secom.manifest.md`: full report including flagged sample briefs.
-- `secom.manifest.json`: complete evidence, settings, all-sample index and feature statistics.
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
 
-On report-generating runs, input verification or parsing errors produce failure reports. An LLM outage retains deterministic results with `model_analysis.status: failure`; `--no-llm` records `skipped`. Overall success means processing completed, not that records passed testing.
+The commands below use Python from that environment directly, so you do not need to activate it.
 
-## Maintain the threshold file
+## 2. Run the example
 
-The tool only reads thresholds; it contains no threshold-fitting or threshold-generation path. To change a bound, feature eligibility, or review cutoff, edit `secom.thresholds.json`, review the change, and check the file into Git. The `settings`, `fit`, and source metadata document how the included values were originally obtained; they do not instruct the tool to calculate new values.
+On macOS/Linux:
 
-## Screening and interpretation
+```sh
+.venv/bin/python run_example.py
+```
 
-The included bounds were originally derived from the earliest 60% of chronological records, with review cutoffs calibrated on the next 20%. The final 20% were excluded from that calculation, as were pass/fail labels. This history is recorded in the threshold file. Runs screen the whole input batch under the `saved_thresholds` cohort and report descriptive results. A sample's anomaly score is the fraction of observed eligible features outside the saved bounds. Missing-data screening considers eligible features only. Eligibility and cutoffs come directly from the threshold file.
+On Windows:
 
-Known failed tests enter the review queue separately. Evaluation excludes these known-failure flags so labels do not artificially guarantee recall. Statistical flags mean unusual measurements, not confirmed defects. An unflagged record is not declared healthy.
+```powershell
+.\.venv\Scripts\python.exe run_example.py
+```
 
-The included thresholds produce 204 queued records out of 1,567: 104 known failed tests and 100 passing records selected for investigation. An earlier held-out evaluation found that independent screening caught **0 of 17 failures**. Reapplying those thresholds to the source dataset produces descriptive screening results, not a new independent validation. This is a prototype for review assistance, not a validated failure detector. Treat model commentary as unverified; use the measured evaluation table for counts and recall.
+The program checks that the included data files have not changed, reads all the records, applies the saved comparison rules, and writes reports into `reports/`.
 
-## Code and tests
+For the included data and current rules, you should see:
 
-- `secom_graph.py`: parsing, profiling, screening, evaluation, graph orchestration and CLI.
-- `secom.thresholds.json`: fixed feature bounds, eligibility, review cutoffs, and historical provenance.
-- `secom_thresholds.py`: threshold loading, validation, and record scoring.
-- `secom_reporting.py`: full and summary Markdown reports.
-- `sensor_graph.py`: the original JSON-reading workflow and local Ollama integration.
+```text
+Done: screened 1,567 records; 204 need review.
+```
+
+The program also prints the full paths to your reports. No Ollama connection is needed for this command.
+
+You can run it again whenever you need to. Each run replaces the reports with the same names. To keep an earlier run, choose a different folder:
+
+```sh
+.venv/bin/python run_example.py --output-dir reports/another-run
+```
+
+On Windows, use `.\.venv\Scripts\python.exe` in place of `.venv/bin/python`.
+
+## 3. Read the results
+
+Open the `reports` folder in your file browser or editor. Start with the summary.
+
+| File | What it is for |
+| --- | --- |
+| [secom.manifest.summary.md](reports/secom.manifest.summary.md) | Start here: results, recommendations, and screening counts |
+| [secom.manifest.md](reports/secom.manifest.md) | Details for every record selected for review |
+| [secom.manifest.json](reports/secom.manifest.json) | Complete results for programs or further analysis |
+
+These files are created by a run. `.md` files are readable text documents with Markdown formatting; `.json` files store structured data. You do not need to understand JSON to read the summary.
+
+### What the results mean
+
+The example selects **204 records**: **104 with an already recorded failed test**, plus **100 passing records** selected because of unusual or missing measurements.
+
+| Term in the report | Plain meaning |
+| --- | --- |
+| Sample / record | One row of historical manufacturing data |
+| Feature | One measurement column; the dataset does not supply its name or unit |
+| Threshold / reference bound | A saved comparison value used to identify unusual measurements |
+| Anomaly | A measurement outside its saved comparison bounds |
+| Coverage | How many of the measurements used for comparison are present |
+| Flag / needs review | A reason for a person to investigate the record |
+| Recorded test failure | A historical failed test supplied with the data |
+| Status: success | The program finished processing the files |
+
+The comparison bounds are statistical references, not approved equipment operating limits. A successful run does not mean all products passed testing. Records without flags are not guaranteed healthy.
+
+Known failed tests are included in the queue automatically. Their inclusion does not show that the program predicted them. The [technical guide](docs/technical-guide.md#current-results-and-limits) explains the evaluation and its limits.
+
+## If something goes wrong
+
+| Problem | What to do |
+| --- | --- |
+| `python3` or `py` is not found | Install Python 3.10 or newer, then reopen your terminal. |
+| Python cannot find `run_example.py` or `requirements.txt` | Use `cd` to open the project folder first. |
+| `.venv` Python is not found | Complete the virtual environment step above; use the command for your operating system. |
+| `No module named 'langgraph'` | Run the dependency installation command above using the same `.venv` Python. |
+| `SHA-256 verification failed` | An included data file differs from the expected original. Restore it from your original project copy. |
+| A threshold file is missing or invalid | Restore `secom.thresholds.json` from your project copy, then try again. |
+| Reports cannot be saved | Choose a writable folder with `--output-dir`. |
+| The program says analysis failed | Read the printed error and the saved error report, if one was created. |
+
+A SHA-256 digest is a file fingerprint. The example uses saved fingerprints to check the two input files; you do not need to calculate them yourself.
+
+## Optional: add an AI explanation
+
+The normal example already produces the screening results and recommendations. If you have local Ollama running with the `qwen3.5:9b` model installed, you can also request an AI explanation:
+
+```sh
+.venv/bin/python run_example.py --with-llm
+```
+
+Use the Windows Python command on Windows. This step may take longer. If Ollama is unavailable, the calculated screening results are still saved.
+
+The model receives a summary of the evidence. It does not choose which records are flagged. Treat its explanation as commentary to check, rather than a verified diagnosis. See [LLM behavior](docs/technical-guide.md#llm-behavior) for details.
+
+## Where things live
+
+| Location | Purpose |
+| --- | --- |
+| `run_example.py` | Simple command for running the included example |
+| `data/secom/` | Included measurements, historical outcomes, and original dataset notes |
+| `secom.thresholds.json` | Saved comparison rules; runs do not change this file |
+| `reports/` | Generated results |
+| `secom_graph.py` | Coordinates the main analysis; also accepts custom input files |
+| `secom_data.py`, `secom_screening.py`, `secom_thresholds.py` | Read the data and apply the rules |
+| `secom_reporting.py` | Builds the readable reports |
+| `analysis_io.py`, `ollama_client.py` | File handling and optional AI connection |
+| `sensor_graph.py` | Separate, smaller sensor example |
+| `test_*.py`, `tests/fixtures/` | Checks that the code behaves as expected |
+| [docs/technical-guide.md](docs/technical-guide.md) | Detailed rules, full commands, and guidance for changing the code |
+
+If you change the code, run the automated checks from the project folder:
 
 ```sh
 .venv/bin/python -m unittest -v
 ```
 
-The original demo is still available with `.venv/bin/python sensor_graph.py`. SECOM attribution and file descriptions are in `data/secom/README.md`. The facility integration roadmap is in `PLAN.md`.
+On Windows, substitute the Windows Python command shown above.
 
-## Extending to facility data
+## About the data
 
-Start by defining a record schema with production entity IDs, equipment and recipe IDs, timestamps, feature names, units and quality flags. Obtain approved limits or independently validated references for comparable process populations, and maintain them in a versioned threshold file. Matching feature counts alone cannot establish that a facility batch uses the same units or process population; that mapping needs to be established before reuse. Validate on later records with known incidents before connecting a prioritized review queue to an operator workflow. The tool is not a live monitoring service.
+The included UCI SECOM dataset contains 1,567 records with 590 anonymous measurement columns from July–October 2008. Missing values are written as `NaN`. Historical labels use `-1` for pass and `1` for fail.
+
+McCann, M. & Johnston, A. (2008). *SECOM* [Dataset]. UCI Machine Learning Repository. [DOI: 10.24432/C54305](https://doi.org/10.24432/C54305). License: [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+
+Original dataset documentation is retained in `data/secom/secom.names`.

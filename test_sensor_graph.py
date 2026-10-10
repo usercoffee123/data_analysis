@@ -59,15 +59,25 @@ class SensorGraphTests(unittest.TestCase):
 
     def test_low_warning_with_unconfigured_sensor(self):
         result = run_assessment(
-            {"readings": [
-                {"sensor_id": "pressure", "value": 2, "unit": "bar", "warning_min": 3},
-                {"sensor_id": "temperature", "value": 68},
-            ]}, analyzer=fake_analyzer,
+            {
+                "readings": [
+                    {
+                        "sensor_id": "pressure",
+                        "value": 2,
+                        "unit": "bar",
+                        "warning_min": 3,
+                    },
+                    {"sensor_id": "temperature", "value": 68},
+                ]
+            },
+            analyzer=fake_analyzer,
         )
         self.assertEqual(result["overall_status"], "warning")
         self.assertIn("below the configured warning min of 3 bar", result["description"])
         self.assertIn("no thresholds were configured", result["description"])
-        self.assertTrue(any("thresholds for temperature" in step for step in result["recommendations"]))
+        self.assertTrue(
+            any("thresholds for temperature" in step for step in result["recommendations"])
+        )
 
     def test_invalid_payload_routes_to_review(self):
         result = run_assessment(
