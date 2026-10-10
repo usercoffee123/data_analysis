@@ -6,11 +6,11 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from secom_graph import DEFAULT_THRESHOLDS_PATH, process_secom, screen_samples
-from secom_thresholds import inspect_row, references_from_thresholds, score_rows, validate_thresholds
+from manufacturing_analysis.secom.workflow import DEFAULT_THRESHOLDS_PATH, process_secom, screen_samples
+from manufacturing_analysis.secom.thresholds import inspect_row, references_from_thresholds, score_rows, validate_thresholds
 
 
-FIXTURE_PATH = Path(__file__).parent / "tests/fixtures/thresholds_2.json"
+FIXTURE_PATH = Path(__file__).resolve().parents[1] / "fixtures/thresholds_2.json"
 
 
 def file_digest(path):
@@ -134,7 +134,7 @@ class ThresholdTests(unittest.TestCase):
             )
             self.assertEqual(failed["status"], "failure")
 
-            with patch("secom_graph.DEFAULT_THRESHOLDS_PATH", thresholds):
+            with patch("manufacturing_analysis.secom.workflow.DEFAULT_THRESHOLDS_PATH", thresholds):
                 default = process_secom(
                     data, labels, data_digest, labels_digest, folder / "default.json", None,
                 )
@@ -158,7 +158,7 @@ class ThresholdTests(unittest.TestCase):
         with TemporaryDirectory() as folder:
             missing_path = Path(folder) / "missing.json"
             state = {"rows": [[1.0, None]], "labels": [-1], "timestamps": ["test"]}
-            with patch("secom_graph.DEFAULT_THRESHOLDS_PATH", missing_path):
+            with patch("manufacturing_analysis.secom.workflow.DEFAULT_THRESHOLDS_PATH", missing_path):
                 with self.assertRaises(FileNotFoundError):
                     screen_samples(state)
 

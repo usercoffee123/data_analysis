@@ -2,23 +2,21 @@
 
 from __future__ import annotations
 
-import argparse
 from datetime import datetime, timezone
-import json
 from pathlib import Path
 from typing import Any, Callable, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
-from analysis_io import read_input, write_json
-from ollama_client import OLLAMA_MODEL, analyze_with_ollama
-from secom_data import parse_secom, profile_secom
-from secom_reporting import write_markdown_report
-from secom_screening import screen_records
-from secom_thresholds import load_thresholds, validate_thresholds
+from manufacturing_analysis.common.io import read_input, write_json
+from manufacturing_analysis.common.ollama import OLLAMA_MODEL, analyze_with_ollama
+from manufacturing_analysis.secom.data import parse_secom, profile_secom
+from manufacturing_analysis.secom.reporting import write_markdown_report
+from manufacturing_analysis.secom.screening import screen_records
+from manufacturing_analysis.secom.thresholds import load_thresholds, validate_thresholds
+from manufacturing_analysis.secom.dataset import DEFAULT_THRESHOLDS_PATH
 
 
-DEFAULT_THRESHOLDS_PATH = Path(__file__).with_name("secom.thresholds.json")
 Analyzer = Callable[[list[dict[str, Any]], list[dict[str, Any]]], dict[str, Any]]
 
 
@@ -196,36 +194,3 @@ def terminal_summary(manifest: dict[str, Any]) -> dict[str, Any]:
     }
     summary["assessment"] = assessment
     return summary
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Analyze UCI SECOM data with LangGraph and local Ollama")
-    parser.add_argument("data", type=Path, help="Measurement file: one record per row")
-    parser.add_argument("labels", type=Path, help="Matching historical test labels and timestamps")
-    parser.add_argument("--sha256", required=True, help="Expected digest of secom.data")
-    parser.add_argument("--labels-sha256", required=True, help="Expected digest of the labels file")
-    parser.add_argument(
-        "--manifest", type=Path, default=Path("secom.manifest.json"),
-        help="JSON output path; short and full Markdown reports are saved beside it",
-    )
-    parser.add_argument("--no-llm", action="store_true", help="Run screening without Ollama")
-    parser.add_argument(
-        "--thresholds", type=Path, default=DEFAULT_THRESHOLDS_PATH,
-        help="Fixed threshold file (default: checked-in secom.thresholds.json beside this script)",
-    )
-    args = parser.parse_args()
-    try:
-        manifest = process_secom(
-            args.data, args.labels, args.sha256, args.labels_sha256, args.manifest,
-            analyzer=None if args.no_llm else analyze_with_ollama,
-            thresholds_path=args.thresholds,
-        )
-    except ValueError as exc:
-        parser.error(str(exc))
-    print(json.dumps(terminal_summary(manifest), indent=2))
-    if manifest["status"] != "success":
-        raise SystemExit(1)
-
-
-if __name__ == "__main__":
-    main()

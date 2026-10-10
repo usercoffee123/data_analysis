@@ -142,7 +142,7 @@ Known failed tests are included in the queue automatically. Their inclusion does
 | `.venv` Python is not found | Complete the virtual environment step above; use the command for your operating system. |
 | `No module named 'langgraph'` | Run the dependency installation command above using the same `.venv` Python. |
 | `SHA-256 verification failed` | An included data file differs from the expected original. Restore it from your original project copy. |
-| A threshold file is missing or invalid | Restore `secom.thresholds.json` from your project copy, then try again. |
+| A threshold file is missing or invalid | Restore `config/secom/thresholds.json` from your project copy, then try again. |
 | Reports cannot be saved | Choose a writable folder with `--output-dir`. |
 | The program says analysis failed | Read the printed error and the saved error report, if one was created. |
 
@@ -162,19 +162,36 @@ The model receives a summary of the evidence. It does not choose which records a
 
 ## Where things live
 
-| Location | Purpose |
-| --- | --- |
-| `run_example.py` | Simple command for running the included example |
-| `data/secom/` | Included measurements, historical outcomes, and original dataset notes |
-| `secom.thresholds.json` | Saved comparison rules; runs do not change this file |
-| `reports/` | Generated results |
-| `secom_graph.py` | Coordinates the main analysis; also accepts custom input files |
-| `secom_data.py`, `secom_screening.py`, `secom_thresholds.py` | Read the data and apply the rules |
-| `secom_reporting.py` | Builds the readable reports |
-| `analysis_io.py`, `ollama_client.py` | File handling and optional AI connection |
-| `sensor_graph.py` | Separate, smaller sensor example |
-| `test_*.py`, `tests/fixtures/` | Checks that the code behaves as expected |
-| [docs/technical-guide.md](docs/technical-guide.md) | Detailed rules, full commands, and guidance for changing the code |
+Source code is grouped by responsibility. Dataset-specific code lives in `secom/`; shared tools live in `common/`.
+
+```text
+data_analysis/
+├── run_example.py              # Simple command for the included example
+├── manufacturing_analysis/     # Python source code
+│   ├── common/                 # File verification, report writing, Ollama
+│   ├── secom/                  # SECOM parsing, screening, reports, commands
+│   ├── sensors/                # Separate JSON sensor workflow and command
+│   └── paths.py                # Locations of project data, rules, and reports
+├── config/
+│   └── secom/thresholds.json    # Saved SECOM comparison rules
+├── data/
+│   ├── secom/                  # Original SECOM dataset and notes
+│   └── sensors/example.json    # Small sensor demo input
+├── tests/
+│   ├── common/                 # Shared-tool checks
+│   ├── secom/                  # SECOM checks
+│   ├── sensors/                # Sensor-workflow checks
+│   └── fixtures/               # Small, fixed test inputs
+├── reports/                    # Generated results; excluded from Git
+├── docs/technical-guide.md     # Detailed rules and developer reference
+└── requirements.txt            # Python tools to install
+```
+
+`run_example.py` is a small launcher. The analysis code is in the package, and the SECOM input paths and file fingerprints are in `manufacturing_analysis/secom/dataset.py`. Runs do not change the saved rules.
+
+Earlier reports that were in the top-level folder are preserved in `reports/archive/`.
+
+For custom SECOM inputs, use `python -m manufacturing_analysis.secom`. For the separate sensor demo, use `python -m manufacturing_analysis.sensors`. Both commands need the project's `.venv` Python prefix, just like the example. See the [technical guide](docs/technical-guide.md) for complete commands.
 
 If you change the code, run the automated checks from the project folder:
 

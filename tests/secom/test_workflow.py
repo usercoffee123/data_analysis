@@ -5,10 +5,11 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from secom_graph import build_secom_graph, parse_secom, process_secom, screen_samples
+from manufacturing_analysis.secom.data import parse_secom
+from manufacturing_analysis.secom.workflow import build_secom_graph, process_secom, screen_samples
 
 
-FIXTURES = Path(__file__).parent / "tests" / "fixtures"
+FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 
 
 def fixture_thresholds(state):

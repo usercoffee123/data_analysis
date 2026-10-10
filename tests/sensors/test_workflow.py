@@ -4,7 +4,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from sensor_graph import process_file, run_assessment
+from manufacturing_analysis.sensors.workflow import process_file, run_assessment
 
 
 def fake_analyzer(readings, assessments):

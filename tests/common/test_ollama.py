@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 from urllib.error import URLError
 
-from ollama_client import OLLAMA_MODEL, OLLAMA_URL, analyze_with_ollama
+from manufacturing_analysis.common.ollama import OLLAMA_MODEL, OLLAMA_URL, analyze_with_ollama
 
 
 class OllamaClientTests(unittest.TestCase):
@@ -21,7 +21,7 @@ class OllamaClientTests(unittest.TestCase):
         readings = [{"sensor_id": "temperature", "value": 68}]
         findings = [{"sensor_id": "temperature", "status": "normal"}]
         with patch(
-            "ollama_client.urlopen",
+            "manufacturing_analysis.common.ollama.urlopen",
             return_value=self.response('{"summary": "Reading is within bounds."}'),
         ) as request:
             result = analyze_with_ollama(readings, findings)
@@ -49,13 +49,13 @@ class OllamaClientTests(unittest.TestCase):
             (None, "invalid JSON analysis"),
         ):
             with self.subTest(content=content), patch(
-                "ollama_client.urlopen", return_value=self.response(content)
+                "manufacturing_analysis.common.ollama.urlopen", return_value=self.response(content)
             ):
                 with self.assertRaisesRegex(RuntimeError, error):
                     analyze_with_ollama([], [])
 
     def test_connection_failure_has_useful_context(self):
-        with patch("ollama_client.urlopen", side_effect=URLError("connection refused")):
+        with patch("manufacturing_analysis.common.ollama.urlopen", side_effect=URLError("connection refused")):
             with self.assertRaisesRegex(RuntimeError, "Could not reach Ollama") as error:
                 analyze_with_ollama([], [])
         self.assertIn(OLLAMA_URL, str(error.exception))

@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import argparse
 from datetime import datetime, timezone
-import hashlib
 import json
 import math
 from pathlib import Path
@@ -12,8 +10,8 @@ from typing import Any, Callable, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
-from analysis_io import read_input, write_json
-from ollama_client import OLLAMA_MODEL, OLLAMA_URL, analyze_with_ollama
+from manufacturing_analysis.common.io import read_input, write_json
+from manufacturing_analysis.common.ollama import OLLAMA_MODEL, analyze_with_ollama
 
 
 THRESHOLD_KEYS = ("warning_min", "warning_max", "critical_min", "critical_max")
@@ -281,57 +279,3 @@ def process_file(
 
     write_json(manifest_path, manifest)
     return manifest
-
-
-SAMPLE_PAYLOAD = {
-    "readings": [
-        {
-            "sensor_id": "pump-07-vibration",
-            "value": 12.4,
-            "unit": "mm/s",
-            "warning_max": 7.1,
-            "critical_max": 11.0,
-        },
-        {
-            "sensor_id": "pump-07-temperature",
-            "value": 68.0,
-            "unit": "C",
-            "warning_max": 75.0,
-            "critical_max": 90.0,
-        },
-    ]
-}
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Verify and analyze sensor readings with LangGraph and Ollama."
-    )
-    parser.add_argument(
-        "input", nargs="?", type=Path, help="JSON file containing a readings array"
-    )
-    parser.add_argument("--sha256", help="Expected SHA-256 digest of the exact input file bytes")
-    parser.add_argument("--manifest", type=Path, help="Manifest output path")
-    args = parser.parse_args()
-
-    if args.input:
-        manifest_path = args.manifest or args.input.with_suffix(
-            args.input.suffix + ".manifest.json"
-        )
-        manifest = process_file(args.input, args.sha256, manifest_path)
-    else:
-        sample_bytes = json.dumps(SAMPLE_PAYLOAD, separators=(",", ":")).encode("utf-8")
-        sample_path = Path("sensor-sample.json")
-        manifest_path = args.manifest or Path("sensor-sample.manifest.json")
-        sample_path.write_bytes(sample_bytes)
-        manifest = process_file(
-            sample_path, hashlib.sha256(sample_bytes).hexdigest(), manifest_path
-        )
-
-    print(json.dumps(manifest, indent=2))
-    if manifest["status"] != "success":
-        raise SystemExit(1)
-
-
-if __name__ == "__main__":
-    main()

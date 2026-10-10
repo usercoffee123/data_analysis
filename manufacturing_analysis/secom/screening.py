@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from secom_thresholds import inspect_row, references_from_thresholds
+from manufacturing_analysis.secom.thresholds import inspect_row, references_from_thresholds
 
 
 FLAG_REASONS = (

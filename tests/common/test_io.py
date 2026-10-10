@@ -6,7 +6,7 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from analysis_io import read_input, write_text
+from manufacturing_analysis.common.io import read_input, write_text
 
 
 class AnalysisIOTests(unittest.TestCase):

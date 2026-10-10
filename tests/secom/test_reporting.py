@@ -4,7 +4,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from secom_reporting import render_summary, write_markdown_report
+from manufacturing_analysis.secom.reporting import render_summary, write_markdown_report
 
 
 def report_manifest():

@@ -4,7 +4,7 @@ from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any
 
-from analysis_io import write_text
+from manufacturing_analysis.common.io import write_text
 
 
 def _table(headers: Sequence[str], rows: Iterable[Sequence[Any]]) -> list[str]:

@@ -3,6 +3,7 @@ __pycache__/
 .venv/
 
 # Generated analysis outputs (raw benchmark files stay available).
+reports/
 *.manifest.json
 *.manifest.md
 *.manifest.summary.md
